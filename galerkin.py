@@ -6,7 +6,6 @@ from numpy.polynomial import Legendre as Leg
 from numpy.polynomial import Chebyshev as Cheb
 
 x = sp.Symbol('x')
-#anna97pha@hotmail.com
 
 def map_reference_domain(x, d, r):
     return r[0] + (r[1]-r[0])*(x-d[0])/(d[1]-d[0])
