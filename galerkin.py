@@ -6,7 +6,7 @@ from numpy.polynomial import Legendre as Leg
 from numpy.polynomial import Chebyshev as Cheb
 
 x = sp.Symbol('x')
-
+#anna97pha@hotmail.com
 
 def map_reference_domain(x, d, r):
     return r[0] + (r[1]-r[0])*(x-d[0])/(d[1]-d[0])
@@ -35,6 +35,8 @@ class FunctionSpace:
 
     @property
     def reference_domain(self):
+        #raise NotImplementedError("Subclasses should implement this method.")
+        # pass
         raise RuntimeError
 
     @property
@@ -76,7 +78,10 @@ class FunctionSpace:
         return P
 
     def eval_derivative_basis_function_all(self, Xj, k=1):
-        raise NotImplementedError
+        P = np.zeros((len(Xj), self.N+1))
+        for j in range(self.N+1):
+            P[:, j] = self.evaluate_derivative_basis_function(Xj, j, k=k)
+        return P
 
     def inner_product(self, u):
         us = map_expression_true_domain(
@@ -100,6 +105,10 @@ class Legendre(FunctionSpace):
     def __init__(self, N, domain=(-1, 1)):
         FunctionSpace.__init__(self, N, domain=domain)
 
+    @property
+    def reference_domain(self):
+        return (-1, 1)
+
     def basis_function(self, j, sympy=False):
         if sympy:
             return sp.legendre(j, x)
@@ -109,10 +118,12 @@ class Legendre(FunctionSpace):
         return self.basis_function(j).deriv(k)
 
     def L2_norm_sq(self, N):
-        raise NotImplementedError
+        n = np.arange(N+1)
+        return 2/(2*n+1)
 
     def mass_matrix(self):
-        raise NotImplementedError
+        m = self.L2_norm_sq(self.N)
+        return sparse.diags(m, 0, format='csr')
 
     def eval(self, uh, xj):
         xj = np.atleast_1d(xj)
@@ -124,6 +135,10 @@ class Chebyshev(FunctionSpace):
 
     def __init__(self, N, domain=(-1, 1)):
         FunctionSpace.__init__(self, N, domain=domain)
+    
+    @property
+    def reference_domain(self):
+        return (-1, 1)
 
     def basis_function(self, j, sympy=False):
         if sympy:
@@ -137,10 +152,16 @@ class Chebyshev(FunctionSpace):
         return 1/sp.sqrt(1-x**2)
 
     def L2_norm_sq(self, N):
-        raise NotImplementedError
+        #c = 2 if N == 0 else 1
+        l2arr = np.zeros(N+1)
+        l2arr[1:] = np.pi/2
+        l2arr[0] = np.pi
+        return l2arr#,c*np.pi/2
 
     def mass_matrix(self):
-        raise NotImplementedError
+        # _,c = self2_norm_sq(self.N))
+        m = self.L2_norm_sq(self.N)#np.array([self.L2_norm_sq(i) for i in range(self.N + 1)])
+        return sparse.diags(m,0, format='csr')
 
     def eval(self, uh, xj):
         xj = np.atleast_1d(xj)
@@ -205,17 +226,35 @@ class Sines(Trigonometric):
 class Cosines(Trigonometric):
 
     def __init__(self, N, domain=(0, 1), bc=(0, 0)):
-        raise NotImplementedError
+        Trigonometric.__init__(self, N, domain=domain)
+        self.B = Neumann(bc, domain, self.reference_domain)
 
     def basis_function(self, j, sympy=False):
-        raise NotImplementedError
-
+        if sympy:
+            return sp.cos(j*sp.pi*x)
+        return lambda Xj: np.cos(j*np.pi*Xj)
+    
     def derivative_basis_function(self, j, k=1):
-        raise NotImplementedError
+
+        factor = (j*np.pi)**k
+        mod = k % 4
+
+        trig_funcs = [np.cos, np.sin, np.cos, np.sin]
+        signs = [1, -1, -1, 1]
+
+        def deriv(Xj):
+            return signs[mod] * factor * trig_funcs[mod](j*np.pi*Xj)
+        return deriv
 
     def L2_norm_sq(self, N):
-        raise NotImplementedError
-
+        l2arr = np.zeros(N+1) 
+        l2arr[:] = 0.5
+        l2arr[0] = 1
+        return l2arr
+    
+    def mass_matrix(self):
+        m = self.L2_norm_sq(self.N)
+        return sparse.diags(m,0, format='csr')
 # Create classes to hold the boundary function
 
 class Dirichlet:
@@ -289,15 +328,28 @@ class DirichletLegendre(Composite, Legendre):
         self.S = sparse.diags((1, -1), (0, 2), shape=(N+1, N+3), format='csr')
 
     def basis_function(self, j, sympy=False):
-        raise NotImplementedError
+        if sympy:
+            return sp.legendre(j, x) - sp.legendre(j+2, x)
+        return Leg.basis(j) - Leg.basis(j+2)
 
 
 class NeumannLegendre(Composite, Legendre):
     def __init__(self, N, domain=(-1, 1), bc=(0, 0), constraint=0):
-        raise NotImplementedError
+        Legendre.__init__(self, N, domain=domain)
+        self.B = Neumann(bc, domain, self.reference_domain)
+        #i(i+1) - i² (i+1)²/((i+2)(i+3)) → (i+2)(i+3) - (i+1)i
+        self.constraint = constraint
+        d1 = np.array([(i+2)*(i+3) for i in range(N+1)])
+        d2 = np.array([-i*(1+i) for i in range(N+1)])
+
+        self.S = sparse.diags([d1, d2], [0, 2], shape=(N+1, N+3), format='csr')
+
 
     def basis_function(self, j, sympy=False):
-        raise NotImplementedError
+        if sympy:
+            return sp.legendre(j,x)*(j+2)*(j+3) - (j+1)*j *sp.legendre(j+2, x) 
+        else:
+            return (j+2)*(j+3) * Leg.basis(j) - (j+1)*j * Leg.basis(j+2)
 
 
 class DirichletChebyshev(Composite, Chebyshev):
@@ -314,12 +366,19 @@ class DirichletChebyshev(Composite, Chebyshev):
 
 
 class NeumannChebyshev(Composite, Chebyshev):
-    def __init__(self, N, domain=(-1, 1), bc=(0, 0), constraint=0):
-        raise NotImplementedError
+    def __init__(self, N: int, domain: tuple[float, float] = (-1, 1), bc: tuple[float, float] = (0, 0), constraint=0):
+        Chebyshev.__init__(self, N, domain=domain)
+        self.B = Neumann(bc, domain, self.reference_domain)
+        self.constraint = constraint
+
+        d1 = np.array([(i+2)**2 for i in range(N+1)])
+        d2 = np.array([-(i)**2 for i in range(N+1)])
+        self.S = sparse.diags([d1, d2], [0, 2], shape=(N+1, N+3), format='csr')
 
     def basis_function(self, j, sympy=False):
-        raise NotImplementedError
-
+        if sympy:
+            return sp.cos(j*sp.acos(x)) * (j+2)**2 - j**2 * sp.cos((j+2)*sp.acos(x))
+        return Cheb.basis(j)*(j+2)**2 - Cheb.basis(j+2)*(j)**2
 
 class BasisFunction:
 
@@ -422,6 +481,7 @@ def test_helmholtz():
     f = ue.diff(x, 2)+ue
     domain = (0, 10)
     for space in (NeumannChebyshev, NeumannLegendre, DirichletChebyshev, DirichletLegendre, Sines, Cosines):
+        print(f'{space.__name__}')
         if space in (NeumannChebyshev, NeumannLegendre, Cosines):
             bc = ue.diff(x, 1).subs(x, domain[0]), ue.diff(
                 x, 1).subs(x, domain[1])
